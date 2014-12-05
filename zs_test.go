@@ -46,6 +46,18 @@ this: is a content`)
 	if body != "this: is a content" {
 		t.Error(body)
 	}
+
+	// Test empty md
+	v, body = md("")
+	if len(v) != 0 || len(body) != 0 {
+		t.Error(v, body)
+	}
+
+	// Test empty header
+	v, body = md("Hello")
+	if len(v) != 0 || body != "Hello" {
+		t.Error(v, body)
+	}
 }
 
 func TestRender(t *testing.T) {

@@ -32,7 +32,9 @@ func split2(s, delim string) (string, string) {
 
 func md(s string) (map[string]string, string) {
 	v := map[string]string{}
-	// FIXME: if no header?
+	if strings.Index(s, "\n\n") == -1 {
+		return map[string]string{}, s
+	}
 	header, body := split2(s, "\n\n")
 	for _, line := range strings.Split(header, "\n") {
 		key, value := split2(line, ":")
