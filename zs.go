@@ -46,32 +46,30 @@ func md(s string) (map[string]string, string) {
 }
 
 func render(s string, vars map[string]string, eval EvalFn) (string, error) {
-	b := []byte(s)
-	delim_open := []byte("{{")
-	delim_close := []byte("}}")
+	delim_open := "{{"
+	delim_close := "}}"
 
 	out := bytes.NewBuffer(nil)
 	for {
-		if from := bytes.Index(b, delim_open); from == -1 {
-			out.Write(b)
+		if from := strings.Index(s, delim_open); from == -1 {
+			out.WriteString(s)
 			return out.String(), nil
 		} else {
-			to := bytes.Index(b, delim_close)
-			if to == -1 {
+			if to := strings.Index(s, delim_close); to == -1 {
 				return "", fmt.Errorf("Close delim not found")
 			} else {
-				out.Write(b[:from])
-				cmd := b[from+len(delim_open) : to]
-				b = b[to+len(delim_close):]
-				m := strings.Fields(string(cmd))
+				out.WriteString(s[:from])
+				cmd := s[from+len(delim_open) : to]
+				s = s[to+len(delim_close):]
+				m := strings.Fields(cmd)
 				if len(m) == 1 {
 					if v, ok := vars[m[0]]; ok {
-						out.Write([]byte(v))
+						out.WriteString(v)
 						continue
 					}
 				}
 				if res, err := eval(m, vars); err == nil {
-					out.Write([]byte(res))
+					out.WriteString(res)
 				} else {
 					log.Println(err) // silent
 				}
@@ -80,28 +78,44 @@ func render(s string, vars map[string]string, eval EvalFn) (string, error) {
 	}
 }
 
-func eval(cmd []string, vars map[string]string) (string, error) {
-	var outbuf, errbuf bytes.Buffer
-	c := exec.Command(path.Join(ZSDIR, cmd[0]), cmd[1:]...)
+func env(vars map[string]string) []string {
 	env := []string{"ZS=" + os.Args[0]}
+	env = append(env, os.Environ()...)
 	for k, v := range vars {
 		env = append(env, "ZS_"+strings.ToUpper(k)+"="+v)
 	}
-	c.Env = append(c.Env, env...)
-	c.Stdout = &outbuf
+	return env
+}
+
+func run(cmd string, args []string, vars map[string]string, output io.Writer) error {
+	var errbuf bytes.Buffer
+	c := exec.Command(cmd, args...)
+	c.Env = env(vars)
+	c.Stdout = output
 	c.Stderr = &errbuf
-	if err := c.Run(); err != nil {
-		log.Println(err)
-		c := exec.Command(path.Join(cmd[0]), cmd[1:]...)
-		c.Env = append(c.Env, env...)
-		c.Stdout = &outbuf
-		c.Stderr = &errbuf
-		if err := c.Run(); err != nil {
-			return "", err
-		}
-	}
+
+	err := c.Run()
+
 	if errbuf.Len() > 0 {
 		log.Println(errbuf.String())
+	}
+
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func eval(cmd []string, vars map[string]string) (string, error) {
+	outbuf := bytes.NewBuffer(nil)
+	err := run(path.Join(ZSDIR, cmd[0]), cmd[1:], vars, outbuf)
+	if err != nil {
+		log.Println(err)
+		outbuf = bytes.NewBuffer(nil)
+		err := run(cmd[0], cmd[1:], vars, outbuf)
+		if err != nil {
+			return "", err
+		}
 	}
 	return outbuf.String(), nil
 }
@@ -247,11 +261,8 @@ func main() {
 			log.Println(err)
 		}
 	default:
-		cmd := exec.Command(path.Join(ZSDIR, cmd), args...)
-		cmd.Env = append(cmd.Env, "ZS="+os.Args[0])
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		err := run(path.Join(ZSDIR, cmd), args, map[string]string{}, os.Stdout)
+		if err != nil {
 			log.Println(err)
 		}
 	}

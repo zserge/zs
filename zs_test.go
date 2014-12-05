@@ -1,6 +1,13 @@
 package main
 
-import "testing"
+import (
+	"bytes"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestSplit2(t *testing.T) {
 	if a, b := split2("a:b", ":"); a != "a" || b != "b" {
@@ -75,4 +82,52 @@ func TestRender(t *testing.T) {
 	if s, err := render("{{greet}} x{{foo}}z", vars, eval); err != nil || s != "hello xbarz" {
 		t.Error()
 	}
+	// Test error case
+	if s, err := render("a {{greet text ", vars, eval); err == nil || len(s) != 0 {
+		t.Error()
+	}
+}
+
+func TestEnv(t *testing.T) {
+	e := env(map[string]string{"foo": "bar", "baz": "hello world"})
+	mustHave := []string{"ZS=" + os.Args[0], "ZS_FOO=bar", "ZS_BAZ=hello world", "PATH="}
+	for _, s := range mustHave {
+		found := false
+		for _, v := range e {
+			if strings.HasPrefix(v, s) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("Missing", s)
+		}
+	}
+}
+
+func TestRun(t *testing.T) {
+	out := bytes.NewBuffer(nil)
+	err := run("some_unbelievable_command_name", []string{}, map[string]string{}, out)
+	if err == nil {
+		t.Error()
+	}
+
+	out = bytes.NewBuffer(nil)
+	err = run(os.Args[0], []string{"-test.run=TestHelperProcess"},
+		map[string]string{"helper": "1", "out": "foo", "err": "bar"}, out)
+	if err != nil {
+		t.Error(err)
+	}
+	if out.String() != "foo\n" {
+		t.Error(out.String())
+	}
+}
+
+func TestHelperProcess(*testing.T) {
+	if os.Getenv("ZS_HELPER") != "1" {
+		return
+	}
+	defer os.Exit(0)                 // TODO check exit code
+	log.Println(os.Getenv("ZS_ERR")) // stderr
+	fmt.Println(os.Getenv("ZS_OUT")) // stdout
 }
