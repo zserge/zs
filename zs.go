@@ -21,6 +21,8 @@ const (
 	PUBDIR = ".pub"
 )
 
+type EvalFn func(args []string, vars map[string]string) (string, error)
+
 func split2(s, delim string) (string, string) {
 	parts := strings.SplitN(s, delim, 2)
 	if len(parts) == 2 {
@@ -42,8 +44,6 @@ func md(s string) (map[string]string, string) {
 	}
 	return v, body
 }
-
-type EvalFn func(args []string, vars map[string]string) (string, error)
 
 func render(s string, vars map[string]string, eval EvalFn) (string, error) {
 	b := []byte(s)
@@ -228,7 +228,7 @@ func main() {
 		buildAll(false) // pass duration
 	case "var":
 		if len(args) == 0 {
-			// print error
+			log.Println("ERROR: filename expected")
 			return
 		}
 		if b, err := ioutil.ReadFile(args[0]); err == nil {
@@ -244,7 +244,7 @@ func main() {
 				}
 			}
 		} else {
-			// print error
+			log.Println(err)
 		}
 	default:
 		cmd := exec.Command(path.Join(ZSDIR, cmd), args...)
