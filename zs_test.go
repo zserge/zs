@@ -49,8 +49,8 @@ this: is a content`)
 }
 
 func TestRender(t *testing.T) {
-	eval := func(a []string) ([]byte, error) {
-		return []byte("hello"), nil
+	eval := func(a []string, vars map[string]string) (string, error) {
+		return "hello", nil
 	}
 	vars := map[string]string{"foo": "bar"}
 
