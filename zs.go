@@ -37,7 +37,6 @@ func md(path, s string) (map[string]string, string) {
 	v := map[string]string{
 		"file":   path,
 		"url":    url,
-		"outdir": PUBDIR,
 		"output": filepath.Join(PUBDIR, url),
 		"layout": "index.html",
 	}
@@ -89,10 +88,12 @@ func render(s string, vars map[string]string, eval EvalFn) (string, error) {
 }
 
 func env(vars map[string]string) []string {
-	env := []string{"ZS=" + os.Args[0]}
+	env := []string{"ZS=" + os.Args[0], "ZS_OUTDIR=" + PUBDIR}
 	env = append(env, os.Environ()...)
-	for k, v := range vars {
-		env = append(env, "ZS_"+strings.ToUpper(k)+"="+v)
+	if vars != nil {
+		for k, v := range vars {
+			env = append(env, "ZS_"+strings.ToUpper(k)+"="+v)
+		}
 	}
 	return env
 }
@@ -159,35 +160,21 @@ func buildMarkdown(path string) error {
 	return nil
 }
 
-func copyFile(path string) error {
-	if in, err := os.Open(path); err != nil {
-		return err
-	} else {
+func copyFile(path string) (err error) {
+	var in, out *os.File
+	if in, err = os.Open(path); err == nil {
 		defer in.Close()
-		if stat, err := in.Stat(); err != nil {
-			return err
-		} else {
-			// Directory?
-			if stat.Mode().IsDir() {
-				os.Mkdir(filepath.Join(PUBDIR, path), 0755)
-				return nil
-			}
-			if !stat.Mode().IsRegular() {
-				return nil
-			}
-		}
-		if out, err := os.Create(filepath.Join(PUBDIR, path)); err != nil {
-			return err
-		} else {
+		if out, err = os.Create(filepath.Join(PUBDIR, path)); err == nil {
 			defer out.Close()
 			_, err = io.Copy(out, in)
-			return err
 		}
 	}
+	return err
 }
 
 func buildAll(once bool) {
 	lastModified := time.Unix(0, 0)
+	modified := false
 	for {
 		os.Mkdir(PUBDIR, 0755)
 		err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
@@ -196,7 +183,15 @@ func buildAll(once bool) {
 				return nil
 			}
 
-			if info.ModTime().After(lastModified) {
+			if info.IsDir() {
+				os.Mkdir(filepath.Join(PUBDIR, path), 0755)
+				return nil
+			} else if info.ModTime().After(lastModified) {
+				if !modified {
+					// About to be modified, so run pre-build hook
+					run(filepath.Join(ZSDIR, "pre"), []string{}, nil, nil)
+					modified = true
+				}
 				ext := filepath.Ext(path)
 				if ext == ".md" || ext == "mkd" {
 					log.Println("mkd: ", path)
@@ -210,6 +205,11 @@ func buildAll(once bool) {
 		})
 		if err != nil {
 			log.Println("ERROR:", err)
+		}
+		if modified {
+			// Something was modified, so post-build hook
+			run(filepath.Join(ZSDIR, "post"), []string{}, nil, nil)
+			modified = false
 		}
 		lastModified = time.Now()
 		if once {
