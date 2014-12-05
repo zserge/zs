@@ -110,10 +110,13 @@ func eval(cmd []string, vars map[string]string) (string, error) {
 	outbuf := bytes.NewBuffer(nil)
 	err := run(path.Join(ZSDIR, cmd[0]), cmd[1:], vars, outbuf)
 	if err != nil {
-		log.Println(err)
+		if _, ok := err.(*exec.ExitError); ok {
+			return "", err
+		}
 		outbuf = bytes.NewBuffer(nil)
 		err := run(cmd[0], cmd[1:], vars, outbuf)
-		if err != nil {
+		// Return exit errors, but ignore if the command was not found
+		if _, ok := err.(*exec.ExitError); ok {
 			return "", err
 		}
 	}

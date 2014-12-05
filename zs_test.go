@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -120,6 +121,24 @@ func TestRun(t *testing.T) {
 	}
 	if out.String() != "foo\n" {
 		t.Error(out.String())
+	}
+}
+
+func TestEvalCommand(t *testing.T) {
+	s, err := eval([]string{"echo", "hello"}, map[string]string{})
+	if err != nil {
+		t.Error(err)
+	}
+	if s != "hello\n" {
+		t.Error(s)
+	}
+	_, err = eval([]string{"cat", "bogus/file"}, map[string]string{})
+	if _, ok := err.(*exec.ExitError); !ok {
+		t.Error("expected ExitError")
+	}
+	_, err = eval([]string{"missing command"}, map[string]string{})
+	if err != nil {
+		t.Error("missing command should be ignored")
 	}
 }
 
