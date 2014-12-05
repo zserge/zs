@@ -32,7 +32,7 @@ func TestSplit2(t *testing.T) {
 }
 
 func TestMD(t *testing.T) {
-	v, body := md(`
+	v, body := md("foo.md", `
 	title: Hello, world!
 	keywords: foo, bar, baz
 	empty:
@@ -56,13 +56,13 @@ this: is a content`)
 	}
 
 	// Test empty md
-	v, body = md("")
+	v, body = md("foo.md", "")
 	if len(v) != 0 || len(body) != 0 {
 		t.Error(v, body)
 	}
 
 	// Test empty header
-	v, body = md("Hello")
+	v, body = md("foo.md", "Hello")
 	if len(v) != 0 || body != "Hello" {
 		t.Error(v, body)
 	}

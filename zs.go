@@ -32,8 +32,15 @@ func split2(s, delim string) (string, string) {
 	}
 }
 
-func md(s string) (map[string]string, string) {
-	v := map[string]string{}
+func md(path, s string) (map[string]string, string) {
+	url := path[:len(path)-len(filepath.Ext(path))] + ".html"
+	v := map[string]string{
+		"file":   path,
+		"url":    url,
+		"outdir": PUBDIR,
+		"output": filepath.Join(PUBDIR, url),
+		"layout": "index.html",
+	}
 	if strings.Index(s, "\n\n") == -1 {
 		return map[string]string{}, s
 	}
@@ -41,6 +48,9 @@ func md(s string) (map[string]string, string) {
 	for _, line := range strings.Split(header, "\n") {
 		key, value := split2(line, ":")
 		v[strings.ToLower(strings.TrimSpace(key))] = strings.TrimSpace(value)
+	}
+	if strings.HasPrefix(v["url"], "./") {
+		v["url"] = v["url"][2:]
 	}
 	return v, body
 }
@@ -128,8 +138,7 @@ func buildMarkdown(path string) error {
 	if err != nil {
 		return err
 	}
-	v, body := md(string(b))
-	defaultVars(v, path)
+	v, body := md(path, string(b))
 	content, err := render(body, v, eval)
 	if err != nil {
 		return err
@@ -148,27 +157,6 @@ func buildMarkdown(path string) error {
 		return err
 	}
 	return nil
-}
-
-func defaultVars(vars map[string]string, path string) {
-	if _, ok := vars["file"]; !ok {
-		vars["file"] = path
-	}
-	if _, ok := vars["url"]; !ok {
-		vars["url"] = path[:len(path)-len(filepath.Ext(path))] + ".html"
-		if strings.HasPrefix(vars["url"], "./") {
-			vars["url"] = vars["url"][2:]
-		}
-	}
-	if _, ok := vars["outdir"]; !ok {
-		vars["outdir"] = PUBDIR
-	}
-	if _, ok := vars["output"]; !ok {
-		vars["output"] = filepath.Join(PUBDIR, vars["url"])
-	}
-	if _, ok := vars["layout"]; !ok {
-		vars["layout"] = "index.html"
-	}
 }
 
 func copyFile(path string) error {
@@ -249,8 +237,7 @@ func main() {
 			return
 		}
 		if b, err := ioutil.ReadFile(args[0]); err == nil {
-			vars, _ := md(string(b))
-			defaultVars(vars, args[0])
+			vars, _ := md(args[0], string(b))
 			if len(args) > 1 {
 				for _, a := range args[1:] {
 					fmt.Println(vars[a])
