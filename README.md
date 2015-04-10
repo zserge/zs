@@ -1,6 +1,8 @@
 zs
 ==
 
+[![Build Status](https://travis-ci.org/zserge/zs.svg?branch=master)](https://travis-ci.org/zserge/zs)
+
 zs is an extremely minimal static site generator written in Go.
 
 It's inspired by `zas` generator, but is even more minimal.
