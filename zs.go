@@ -13,7 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eknkc/amber"
 	"github.com/russross/blackfriday"
+	"github.com/yosssi/gcss"
 )
 
 const (
@@ -21,8 +23,12 @@ const (
 	PUBDIR = ".pub"
 )
 
-type EvalFn func(args []string, vars map[string]string) (string, error)
+type Vars map[string]string
 
+type EvalFn func(args []string, vars Vars) (string, error)
+
+// Splits a string in exactly two parts by delimiter
+// If no delimiter is found - the second string is be empty
 func split2(s, delim string) (string, string) {
 	parts := strings.SplitN(s, delim, 2)
 	if len(parts) == 2 {
@@ -32,16 +38,22 @@ func split2(s, delim string) (string, string) {
 	}
 }
 
-func md(path, s string) (map[string]string, string) {
+// Parses markdown content. Returns parsed header variables and content
+func md(path string) (Vars, string, error) {
+	b, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, "", err
+	}
+	s := string(b)
 	url := path[:len(path)-len(filepath.Ext(path))] + ".html"
-	v := map[string]string{
+	v := Vars{
 		"file":   path,
 		"url":    url,
 		"output": filepath.Join(PUBDIR, url),
 		"layout": "index.html",
 	}
 	if strings.Index(s, "\n\n") == -1 {
-		return map[string]string{}, s
+		return Vars{}, s, nil
 	}
 	header, body := split2(s, "\n\n")
 	for _, line := range strings.Split(header, "\n") {
@@ -51,10 +63,10 @@ func md(path, s string) (map[string]string, string) {
 	if strings.HasPrefix(v["url"], "./") {
 		v["url"] = v["url"][2:]
 	}
-	return v, body
+	return v, body, nil
 }
 
-func render(s string, vars map[string]string, eval EvalFn) (string, error) {
+func render(s string, vars Vars, eval EvalFn) (string, error) {
 	delim_open := "{{"
 	delim_close := "}}"
 
@@ -87,7 +99,8 @@ func render(s string, vars map[string]string, eval EvalFn) (string, error) {
 	}
 }
 
-func env(vars map[string]string) []string {
+// Converts zs markdown variables into environment variables
+func env(vars Vars) []string {
 	env := []string{"ZS=" + os.Args[0], "ZS_OUTDIR=" + PUBDIR}
 	env = append(env, os.Environ()...)
 	if vars != nil {
@@ -98,7 +111,9 @@ func env(vars map[string]string) []string {
 	return env
 }
 
-func run(cmd string, args []string, vars map[string]string, output io.Writer) error {
+// Runs command with given arguments and variables, intercepts stderr and
+// redirects stdout into the given writer
+func run(cmd string, args []string, vars Vars, output io.Writer) error {
 	var errbuf bytes.Buffer
 	c := exec.Command(cmd, args...)
 	c.Env = env(vars)
@@ -117,7 +132,7 @@ func run(cmd string, args []string, vars map[string]string, output io.Writer) er
 	return nil
 }
 
-func eval(cmd []string, vars map[string]string) (string, error) {
+func eval(cmd []string, vars Vars) (string, error) {
 	outbuf := bytes.NewBuffer(nil)
 	err := run(path.Join(ZSDIR, cmd[0]), cmd[1:], vars, outbuf)
 	if err != nil {
@@ -135,11 +150,10 @@ func eval(cmd []string, vars map[string]string) (string, error) {
 }
 
 func buildMarkdown(path string) error {
-	b, err := ioutil.ReadFile(path)
+	v, body, err := md(path)
 	if err != nil {
 		return err
 	}
-	v, body := md(path, string(b))
 	content, err := render(body, v, eval)
 	if err != nil {
 		return err
@@ -148,7 +162,7 @@ func buildMarkdown(path string) error {
 	return buildPlain(filepath.Join(ZSDIR, v["layout"]), v)
 }
 
-func buildPlain(path string, vars map[string]string) error {
+func buildPlain(path string, vars Vars) error {
 	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		return err
@@ -166,6 +180,45 @@ func buildPlain(path string, vars map[string]string) error {
 		return err
 	}
 	return nil
+}
+
+func buildGCSS(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	s := strings.TrimSuffix(path, ".gcss") + ".css"
+	log.Println(s)
+	css, err := os.Create(filepath.Join(PUBDIR, s))
+	if err != nil {
+		return err
+	}
+
+	defer f.Close()
+	defer css.Close()
+
+	_, err = gcss.Compile(css, f)
+	return err
+}
+
+func buildAmber(path string, vars Vars) error {
+	a := amber.New()
+	err := a.ParseFile(path)
+	if err != nil {
+		return err
+	}
+	t, err := a.Compile()
+	if err != nil {
+		return err
+	}
+	//amber.FuncMap = amber.FuncMap
+	s := strings.TrimSuffix(path, ".amber") + ".html"
+	f, err := os.Create(filepath.Join(PUBDIR, s))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return t.Execute(f, vars)
 }
 
 func copyFile(path string) (err error) {
@@ -202,10 +255,17 @@ func buildAll(once bool) {
 				}
 				ext := filepath.Ext(path)
 				if ext == ".md" || ext == ".mkd" {
-					log.Println("mkd: ", path)
+					log.Println("md: ", path)
 					return buildMarkdown(path)
 				} else if ext == ".html" || ext == ".xml" {
-					return buildPlain(path, map[string]string{})
+					log.Println("html: ", path)
+					return buildPlain(path, Vars{})
+				} else if ext == ".amber" {
+					log.Println("html: ", path)
+					return buildAmber(path, Vars{})
+				} else if ext == ".gcss" {
+					log.Println("css: ", path)
+					return buildGCSS(path)
 				} else {
 					log.Println("raw: ", path)
 					return copyFile(path)
@@ -246,8 +306,7 @@ func main() {
 			log.Println("ERROR: filename expected")
 			return
 		}
-		if b, err := ioutil.ReadFile(args[0]); err == nil {
-			vars, _ := md(args[0], string(b))
+		if vars, _, err := md(args[0]); err == nil {
 			if len(args) > 1 {
 				for _, a := range args[1:] {
 					fmt.Println(vars[a])
@@ -261,7 +320,7 @@ func main() {
 			log.Println(err)
 		}
 	default:
-		err := run(path.Join(ZSDIR, cmd), args, map[string]string{}, os.Stdout)
+		err := run(path.Join(ZSDIR, cmd), args, Vars{}, os.Stdout)
 		if err != nil {
 			log.Println(err)
 		}

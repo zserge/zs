@@ -1,0 +1,6 @@
+$base-font: Helvetica, sans-serif
+$main-color: blue
+
+body
+  font: 100% $base-font
+  color: $main-color

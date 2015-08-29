@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -31,14 +32,20 @@ func TestSplit2(t *testing.T) {
 	}
 }
 
+func tmpfile(path, s string) string {
+	ioutil.WriteFile(path, []byte(s), 0644)
+	return path
+}
+
 func TestMD(t *testing.T) {
-	v, body := md("foo.md", `
+	defer os.Remove("foo.md")
+	v, body, _ := md(tmpfile("foo.md", `
 	title: Hello, world!
 	keywords: foo, bar, baz
 	empty:
 	bayan: [:|||:]
 
-this: is a content`)
+this: is a content`))
 	if v["title"] != "Hello, world!" {
 		t.Error()
 	}
@@ -56,20 +63,20 @@ this: is a content`)
 	}
 
 	// Test empty md
-	v, body = md("foo.md", "")
+	v, body, _ = md(tmpfile("foo.md", ""))
 	if len(v) != 0 || len(body) != 0 {
 		t.Error(v, body)
 	}
 
 	// Test empty header
-	v, body = md("foo.md", "Hello")
+	v, body, _ = md(tmpfile("foo.md", "Hello"))
 	if len(v) != 0 || body != "Hello" {
 		t.Error(v, body)
 	}
 }
 
 func TestRender(t *testing.T) {
-	eval := func(a []string, vars map[string]string) (string, error) {
+	eval := func(a []string, vars Vars) (string, error) {
 		return "hello", nil
 	}
 	vars := map[string]string{"foo": "bar"}
