@@ -193,7 +193,7 @@ func buildAll(once bool) {
 					modified = true
 				}
 				ext := filepath.Ext(path)
-				if ext == ".md" || ext == "mkd" {
+				if ext == ".md" || ext == ".mkd" {
 					log.Println("mkd: ", path)
 					return buildMarkdown(path)
 				} else {
