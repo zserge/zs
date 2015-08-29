@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"text/template"
 )
 
 func TestSplit2(t *testing.T) {
@@ -76,23 +77,29 @@ this: is a content`))
 }
 
 func TestRender(t *testing.T) {
-	eval := func(a []string, vars Vars) (string, error) {
-		return "hello", nil
-	}
 	vars := map[string]string{"foo": "bar"}
+	funcs := template.FuncMap{
+		"greet": func(s ...string) string {
+			if len(s) == 0 {
+				return "hello"
+			} else {
+				return "hello " + strings.Join(s, " ")
+			}
+		},
+	}
 
-	if s, err := render("plain text", vars, eval); err != nil || s != "plain text" {
-		t.Error()
+	if s, err := render("plain text", funcs, vars); err != nil || s != "plain text" {
+		t.Error(s, err)
 	}
-	if s, err := render("a {{greet}} text", vars, eval); err != nil || s != "a hello text" {
-		t.Error()
+	if s, err := render("a {{greet}} text", funcs, vars); err != nil || s != "a hello text" {
+		t.Error(s, err)
 	}
-	if s, err := render("{{greet}} x{{foo}}z", vars, eval); err != nil || s != "hello xbarz" {
-		t.Error()
+	if s, err := render("{{greet}} x{{foo}}z", funcs, vars); err != nil || s != "hello xbarz" {
+		t.Error(s, err)
 	}
 	// Test error case
-	if s, err := render("a {{greet text ", vars, eval); err == nil || len(s) != 0 {
-		t.Error()
+	if s, err := render("a {{greet text ", funcs, vars); err == nil || len(s) != 0 {
+		t.Error(s, err)
 	}
 }
 
