@@ -14,9 +14,9 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/eknkc/amber"
 	"github.com/russross/blackfriday"
 	"github.com/yosssi/gcss"
+	"github.com/zserge/amber"
 )
 
 const (
@@ -49,8 +49,13 @@ func md(path string, globals Vars) (Vars, string, error) {
 		"file":   path,
 		"url":    url,
 		"output": filepath.Join(PUBDIR, url),
-		"layout": "index.html",
 	}
+	if _, err := os.Stat(filepath.Join(ZSDIR, "layout.amber")); err == nil {
+		v["layout"] = "layout.amber"
+	} else {
+		v["layout"] = "layout.html"
+	}
+
 	if info, err := os.Stat(path); err == nil {
 		v["date"] = info.ModTime().Format("02-01-2006")
 	}
@@ -115,7 +120,7 @@ func run(cmd string, args []string, vars Vars, output io.Writer) error {
 	err := c.Run()
 
 	if errbuf.Len() > 0 {
-		log.Println(errbuf.String())
+		log.Println("ERROR:", errbuf.String())
 	}
 
 	if err != nil {
@@ -155,15 +160,17 @@ func buildMarkdown(path string, funcs template.FuncMap, vars Vars) error {
 	}
 	v["content"] = string(blackfriday.MarkdownBasic([]byte(content)))
 	if strings.HasSuffix(v["layout"], ".amber") {
-		return buildAmber(filepath.Join(ZSDIR, v["layout"]), funcs, v)
+		return buildAmber(filepath.Join(ZSDIR, v["layout"]),
+			renameExt(path, "", ".html"), funcs, v)
 	} else {
-		return buildPlain(filepath.Join(ZSDIR, v["layout"]), funcs, v)
+		return buildPlain(filepath.Join(ZSDIR, v["layout"]),
+			renameExt(path, "", ".html"), funcs, v)
 	}
 }
 
 // Renders text file expanding all variable macros inside it
-func buildPlain(path string, funcs template.FuncMap, vars Vars) error {
-	b, err := ioutil.ReadFile(path)
+func buildPlain(in, out string, funcs template.FuncMap, vars Vars) error {
+	b, err := ioutil.ReadFile(in)
 	if err != nil {
 		return err
 	}
@@ -171,7 +178,7 @@ func buildPlain(path string, funcs template.FuncMap, vars Vars) error {
 	if err != nil {
 		return err
 	}
-	output := filepath.Join(PUBDIR, path)
+	output := filepath.Join(PUBDIR, out)
 	if s, ok := vars["output"]; ok {
 		output = s
 	}
@@ -183,9 +190,9 @@ func buildPlain(path string, funcs template.FuncMap, vars Vars) error {
 }
 
 // Renders .amber file into .html
-func buildAmber(path string, funcs template.FuncMap, vars Vars) error {
+func buildAmber(in, out string, funcs template.FuncMap, vars Vars) error {
 	a := amber.New()
-	err := a.ParseFile(path)
+	err := a.ParseFile(in)
 	if err != nil {
 		return err
 	}
@@ -194,8 +201,7 @@ func buildAmber(path string, funcs template.FuncMap, vars Vars) error {
 		return err
 	}
 	//amber.FuncMap = amber.FuncMap
-	s := strings.TrimSuffix(path, ".amber") + ".html"
-	f, err := os.Create(filepath.Join(PUBDIR, s))
+	f, err := os.Create(filepath.Join(PUBDIR, out))
 	if err != nil {
 		return err
 	}
@@ -272,6 +278,13 @@ func createFuncs() template.FuncMap {
 	return funcs
 }
 
+func renameExt(path, from, to string) string {
+	if from == "" {
+		from = filepath.Ext(path)
+	}
+	return strings.TrimSuffix(path, from) + to
+}
+
 func globals() Vars {
 	vars := Vars{}
 	for _, e := range os.Environ() {
@@ -313,10 +326,10 @@ func buildAll(once bool) {
 					return buildMarkdown(path, funcs, vars)
 				} else if ext == ".html" || ext == ".xml" {
 					log.Println("html: ", path)
-					return buildPlain(path, funcs, vars)
+					return buildPlain(path, path, funcs, vars)
 				} else if ext == ".amber" {
 					log.Println("html: ", path)
-					return buildAmber(path, funcs, vars)
+					return buildAmber(path, renameExt(path, ".amber", ".html"), funcs, vars)
 				} else if ext == ".gcss" {
 					log.Println("css: ", path)
 					return buildGCSS(path)
@@ -372,12 +385,12 @@ func main() {
 				}
 			}
 		} else {
-			log.Println(err)
+			log.Println("ERROR:", err)
 		}
 	default:
 		err := run(path.Join(ZSDIR, cmd), args, Vars{}, os.Stdout)
 		if err != nil {
-			log.Println(err)
+			log.Println("ERROR:", err)
 		}
 	}
 }
