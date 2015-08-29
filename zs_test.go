@@ -46,7 +46,7 @@ func TestMD(t *testing.T) {
 	empty:
 	bayan: [:|||:]
 
-this: is a content`))
+this: is a content`), Vars{})
 	if v["title"] != "Hello, world!" {
 		t.Error()
 	}
@@ -64,14 +64,14 @@ this: is a content`))
 	}
 
 	// Test empty md
-	v, body, _ = md(tmpfile("foo.md", ""))
-	if len(v) != 0 || len(body) != 0 {
+	v, body, _ = md(tmpfile("foo.md", ""), Vars{})
+	if v["url"] != "foo.html" || len(body) != 0 {
 		t.Error(v, body)
 	}
 
 	// Test empty header
-	v, body, _ = md(tmpfile("foo.md", "Hello"))
-	if len(v) != 0 || body != "Hello" {
+	v, body, _ = md(tmpfile("foo.md", "Hello"), Vars{})
+	if v["url"] != "foo.html" || body != "Hello" {
 		t.Error(v, body)
 	}
 }

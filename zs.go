@@ -38,7 +38,7 @@ func split2(s, delim string) (string, string) {
 }
 
 // Parses markdown content. Returns parsed header variables and content
-func md(path string) (Vars, string, error) {
+func md(path string, globals Vars) (Vars, string, error) {
 	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, "", err
@@ -51,8 +51,14 @@ func md(path string) (Vars, string, error) {
 		"output": filepath.Join(PUBDIR, url),
 		"layout": "index.html",
 	}
+	if info, err := os.Stat(path); err == nil {
+		v["date"] = info.ModTime().Format("02-01-2006")
+	}
+	for name, value := range globals {
+		v[name] = value
+	}
 	if strings.Index(s, "\n\n") == -1 {
-		return Vars{}, s, nil
+		return v, s, nil
 	}
 	header, body := split2(s, "\n\n")
 	for _, line := range strings.Split(header, "\n") {
@@ -139,7 +145,7 @@ func eval(cmd []string, vars Vars) (string, error) {
 
 // Renders markdown with the given layout into html expanding all the macros
 func buildMarkdown(path string, funcs template.FuncMap, vars Vars) error {
-	v, body, err := md(path)
+	v, body, err := md(path, vars)
 	if err != nil {
 		return err
 	}
@@ -243,7 +249,16 @@ func pluginFunc(cmd string) func() string {
 
 func createFuncs() template.FuncMap {
 	// Builtin functions
-	funcs := template.FuncMap{}
+	funcs := template.FuncMap{
+		"exec": func(s ...string) string {
+			// Run external command with arguments
+			return ""
+		},
+		"zs": func(args ...string) string {
+			// Run zs with arguments
+			return ""
+		},
+	}
 	// Plugin functions
 	files, _ := ioutil.ReadDir(ZSDIR)
 	for _, f := range files {
@@ -257,17 +272,22 @@ func createFuncs() template.FuncMap {
 	return funcs
 }
 
-func buildAll(once bool) {
-	lastModified := time.Unix(0, 0)
-	modified := false
-	// Convert env variables into zs global variables
-	globals := Vars{}
+func globals() Vars {
+	vars := Vars{}
 	for _, e := range os.Environ() {
 		pair := strings.Split(e, "=")
 		if strings.HasPrefix(pair[0], "ZS_") {
-			globals[strings.ToLower(pair[0][3:])] = pair[1]
+			vars[strings.ToLower(pair[0][3:])] = pair[1]
 		}
 	}
+	return vars
+}
+
+func buildAll(once bool) {
+	lastModified := time.Unix(0, 0)
+	modified := false
+
+	vars := globals()
 	for {
 		os.Mkdir(PUBDIR, 0755)
 		funcs := createFuncs()
@@ -290,13 +310,13 @@ func buildAll(once bool) {
 				ext := filepath.Ext(path)
 				if ext == ".md" || ext == ".mkd" {
 					log.Println("md: ", path)
-					return buildMarkdown(path, funcs, globals)
+					return buildMarkdown(path, funcs, vars)
 				} else if ext == ".html" || ext == ".xml" {
 					log.Println("html: ", path)
-					return buildPlain(path, funcs, globals)
+					return buildPlain(path, funcs, vars)
 				} else if ext == ".amber" {
 					log.Println("html: ", path)
-					return buildAmber(path, funcs, globals)
+					return buildAmber(path, funcs, vars)
 				} else if ext == ".gcss" {
 					log.Println("css: ", path)
 					return buildGCSS(path)
@@ -341,7 +361,7 @@ func main() {
 			log.Println("ERROR: filename expected")
 			return
 		}
-		if vars, _, err := md(args[0]); err == nil {
+		if vars, _, err := md(args[0], globals()); err == nil {
 			if len(args) > 1 {
 				for _, a := range args[1:] {
 					fmt.Println(vars[a])
