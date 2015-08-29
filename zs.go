@@ -145,15 +145,23 @@ func buildMarkdown(path string) error {
 		return err
 	}
 	v["content"] = string(blackfriday.MarkdownBasic([]byte(content)))
-	b, err = ioutil.ReadFile(filepath.Join(ZSDIR, v["layout"]))
+	return buildPlain(filepath.Join(ZSDIR, v["layout"]), v)
+}
+
+func buildPlain(path string, vars map[string]string) error {
+	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	content, err = render(string(b), v, eval)
+	content, err := render(string(b), vars, eval)
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(v["output"], []byte(content), 0666)
+	output := filepath.Join(PUBDIR, path)
+	if s, ok := vars["output"]; ok {
+		output = s
+	}
+	err = ioutil.WriteFile(output, []byte(content), 0666)
 	if err != nil {
 		return err
 	}
