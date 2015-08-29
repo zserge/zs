@@ -1,0 +1,12 @@
+html
+	head
+		title My blog
+		link[href="styles.css"][rel="stylesheet"][type="text/css"]
+	body
+		p Here goes list of posts
+		ul
+			li
+				a[href="/posts/hello.html"] First post
+			li
+				a[href="/posts/update.html"] Second post
+
