@@ -14,9 +14,9 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/eknkc/amber"
 	"github.com/russross/blackfriday"
 	"github.com/yosssi/gcss"
-	"github.com/zserge/amber"
 )
 
 const (
