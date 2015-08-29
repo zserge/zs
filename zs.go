@@ -204,6 +204,8 @@ func buildAll(once bool) {
 				if ext == ".md" || ext == ".mkd" {
 					log.Println("mkd: ", path)
 					return buildMarkdown(path)
+				} else if ext == ".html" || ext == ".xml" {
+					return buildPlain(path, map[string]string{})
 				} else {
 					log.Println("raw: ", path)
 					return copyFile(path)
