@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/drhodes/golorem"
+	"github.com/google/gxui/math"
+	"github.com/jaytaylor/html2text"
 )
 
 // zs var <filename> -- returns list of variables and their values
@@ -69,4 +73,30 @@ func DateParse(args []string) string {
 	} else {
 		return strconv.FormatInt(d.Unix(), 10)
 	}
+}
+
+// zs wc <file> -- returns word count in the file (markdown, html or amber)
+func WordCount(args []string) int {
+	if os.Getenv("ZS_RECURSION") != "" {
+		return 0
+	}
+	if len(args) != 1 {
+		return 0
+	}
+	os.Setenv("ZS_RECURSION", "1")
+	out := &bytes.Buffer{}
+	if err := build(args[0], out, builtins(), globals()); err != nil {
+		return 0
+	}
+	if s, err := html2text.FromString(string(out.Bytes())); err != nil {
+		return 0
+	} else {
+		return len(strings.Fields(s))
+	}
+}
+
+// zs timetoread <file> -- returns number of minutes required to read the text
+func TimeToRead(args []string) int {
+	wc := WordCount(args)
+	return int(math.Round(float64(wc) / float64(200)))
 }

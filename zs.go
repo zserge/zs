@@ -304,6 +304,10 @@ func main() {
 		fmt.Println(DateParse(args))
 	case "datefmt":
 		fmt.Println(DateFmt(args))
+	case "wc":
+		fmt.Println(WordCount(args))
+	case "timetoread":
+		fmt.Println(TimeToRead(args))
 	default:
 		err := run(path.Join(ZSDIR, cmd), args, Vars{}, os.Stdout)
 		if err != nil {
