@@ -35,9 +35,12 @@ func md(path string, globals Vars) (Vars, string, error) {
 	s := string(b)
 	url := path[:len(path)-len(filepath.Ext(path))] + ".html"
 	v := Vars{
-		"file":   path,
-		"url":    url,
-		"output": filepath.Join(PUBDIR, url),
+		"file":        path,
+		"url":         url,
+		"title":       "",
+		"description": "",
+		"keywords":    "",
+		"output":      filepath.Join(PUBDIR, url),
 	}
 	if _, err := os.Stat(filepath.Join(ZSDIR, "layout.amber")); err == nil {
 		v["layout"] = "layout.amber"
@@ -45,9 +48,6 @@ func md(path string, globals Vars) (Vars, string, error) {
 		v["layout"] = "layout.html"
 	}
 
-	if info, err := os.Stat(path); err == nil {
-		v["date"] = info.ModTime().Format("02-01-2006")
-	}
 	for name, value := range globals {
 		v[name] = value
 	}
