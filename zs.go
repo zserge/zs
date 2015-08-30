@@ -309,7 +309,7 @@ func main() {
 	case "timetoread":
 		fmt.Println(TimeToRead(args))
 	default:
-		err := run(path.Join(ZSDIR, cmd), args, Vars{}, os.Stdout)
+		err := run(path.Join(ZSDIR, cmd), args, globals(), os.Stdout)
 		if err != nil {
 			log.Println("ERROR:", err)
 		}
