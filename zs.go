@@ -243,6 +243,11 @@ func buildAll(watch bool) {
 			if filepath.Base(path)[0] == '.' || strings.HasPrefix(path, ".") {
 				return nil
 			}
+			// inform user about fs walk errors, but continue iteration
+			if err != nil {
+				log.Println("ERROR:", err)
+				return nil
+			}
 
 			if info.IsDir() {
 				os.Mkdir(filepath.Join(PUBDIR, path), 0755)
