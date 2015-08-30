@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"math"
+
 	"github.com/drhodes/golorem"
-	"github.com/google/gxui/math"
 	"github.com/jaytaylor/html2text"
 )
 
@@ -98,5 +99,5 @@ func WordCount(args []string) int {
 // zs timetoread <file> -- returns number of minutes required to read the text
 func TimeToRead(args []string) int {
 	wc := WordCount(args)
-	return int(math.Round(float64(wc) / float64(200)))
+	return int(math.Floor(float64(wc)/200.0 + .5))
 }
