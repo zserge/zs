@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -25,17 +24,7 @@ const (
 )
 
 type Vars map[string]string
-
-// Splits a string in exactly two parts by delimiter
-// If no delimiter is found - the second string is be empty
-func split2(s, delim string) (string, string) {
-	parts := strings.SplitN(s, delim, 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	} else {
-		return parts[0], ""
-	}
-}
+type Funcs template.FuncMap
 
 // Parses markdown content. Returns parsed header variables and content
 func md(path string, globals Vars) (Vars, string, error) {
@@ -77,15 +66,26 @@ func md(path string, globals Vars) (Vars, string, error) {
 }
 
 // Use standard Go templates
-func render(s string, funcs template.FuncMap, vars Vars) (string, error) {
-	f := template.FuncMap{}
+func render(s string, funcs Funcs, vars Vars) (string, error) {
+	f := Funcs{}
 	for k, v := range funcs {
 		f[k] = v
 	}
 	for k, v := range vars {
 		f[k] = varFunc(v)
 	}
-	tmpl, err := template.New("").Funcs(f).Parse(s)
+	// Plugin functions
+	files, _ := ioutil.ReadDir(ZSDIR)
+	for _, file := range files {
+		if !file.IsDir() {
+			name := file.Name()
+			if !strings.HasSuffix(name, ".html") && !strings.HasSuffix(name, ".amber") {
+				f[strings.TrimSuffix(name, filepath.Ext(name))] = pluginFunc(name, vars)
+			}
+		}
+	}
+
+	tmpl, err := template.New("").Funcs(template.FuncMap(f)).Parse(s)
 	if err != nil {
 		return "", err
 	}
@@ -96,60 +96,8 @@ func render(s string, funcs template.FuncMap, vars Vars) (string, error) {
 	return string(out.Bytes()), nil
 }
 
-// Converts zs markdown variables into environment variables
-func env(vars Vars) []string {
-	env := []string{"ZS=" + os.Args[0], "ZS_OUTDIR=" + PUBDIR}
-	env = append(env, os.Environ()...)
-	if vars != nil {
-		for k, v := range vars {
-			env = append(env, "ZS_"+strings.ToUpper(k)+"="+v)
-		}
-	}
-	return env
-}
-
-// Runs command with given arguments and variables, intercepts stderr and
-// redirects stdout into the given writer
-func run(cmd string, args []string, vars Vars, output io.Writer) error {
-	var errbuf bytes.Buffer
-	c := exec.Command(cmd, args...)
-	c.Env = env(vars)
-	c.Stdout = output
-	c.Stderr = &errbuf
-
-	err := c.Run()
-
-	if errbuf.Len() > 0 {
-		log.Println("ERROR:", errbuf.String())
-	}
-
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// Expands macro: either replacing it with the variable value, or
-// running the plugin command and replacing it with the command's output
-func eval(cmd []string, vars Vars) (string, error) {
-	outbuf := bytes.NewBuffer(nil)
-	err := run(path.Join(ZSDIR, cmd[0]), cmd[1:], vars, outbuf)
-	if err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
-			return "", err
-		}
-		outbuf = bytes.NewBuffer(nil)
-		err := run(cmd[0], cmd[1:], vars, outbuf)
-		// Return exit errors, but ignore if the command was not found
-		if _, ok := err.(*exec.ExitError); ok {
-			return "", err
-		}
-	}
-	return outbuf.String(), nil
-}
-
 // Renders markdown with the given layout into html expanding all the macros
-func buildMarkdown(path string, funcs template.FuncMap, vars Vars) error {
+func buildMarkdown(path string, w io.Writer, funcs Funcs, vars Vars) error {
 	v, body, err := md(path, vars)
 	if err != nil {
 		return err
@@ -159,18 +107,24 @@ func buildMarkdown(path string, funcs template.FuncMap, vars Vars) error {
 		return err
 	}
 	v["content"] = string(blackfriday.MarkdownBasic([]byte(content)))
+	if w == nil {
+		out, err := os.Create(filepath.Join(PUBDIR, renameExt(path, "", ".html")))
+		if err != nil {
+			return err
+		}
+		defer out.Close()
+		w = out
+	}
 	if strings.HasSuffix(v["layout"], ".amber") {
-		return buildAmber(filepath.Join(ZSDIR, v["layout"]),
-			renameExt(path, "", ".html"), funcs, v)
+		return buildAmber(filepath.Join(ZSDIR, v["layout"]), w, funcs, v)
 	} else {
-		return buildPlain(filepath.Join(ZSDIR, v["layout"]),
-			renameExt(path, "", ".html"), funcs, v)
+		return buildHTML(filepath.Join(ZSDIR, v["layout"]), w, funcs, v)
 	}
 }
 
 // Renders text file expanding all variable macros inside it
-func buildPlain(in, out string, funcs template.FuncMap, vars Vars) error {
-	b, err := ioutil.ReadFile(in)
+func buildHTML(path string, w io.Writer, funcs Funcs, vars Vars) error {
+	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		return err
 	}
@@ -178,7 +132,7 @@ func buildPlain(in, out string, funcs template.FuncMap, vars Vars) error {
 	if err != nil {
 		return err
 	}
-	output := filepath.Join(PUBDIR, out)
+	output := filepath.Join(PUBDIR, path)
 	if s, ok := vars["output"]; ok {
 		output = s
 	}
@@ -190,9 +144,9 @@ func buildPlain(in, out string, funcs template.FuncMap, vars Vars) error {
 }
 
 // Renders .amber file into .html
-func buildAmber(in, out string, funcs template.FuncMap, vars Vars) error {
+func buildAmber(path string, w io.Writer, funcs Funcs, vars Vars) error {
 	a := amber.New()
-	err := a.ParseFile(in)
+	err := a.ParseFile(path)
 	if err != nil {
 		return err
 	}
@@ -200,110 +154,80 @@ func buildAmber(in, out string, funcs template.FuncMap, vars Vars) error {
 	if err != nil {
 		return err
 	}
-	//amber.FuncMap = amber.FuncMap
-	f, err := os.Create(filepath.Join(PUBDIR, out))
-	if err != nil {
-		return err
+	if w == nil {
+		f, err := os.Create(filepath.Join(PUBDIR, renameExt(path, ".amber", ".html")))
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
 	}
-	defer f.Close()
-	return t.Execute(f, vars)
+	return t.Execute(w, vars)
 }
 
 // Compiles .gcss into .css
-func buildGCSS(path string) error {
+func buildGCSS(path string, w io.Writer) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	s := strings.TrimSuffix(path, ".gcss") + ".css"
-	css, err := os.Create(filepath.Join(PUBDIR, s))
+	defer f.Close()
+
+	if w == nil {
+		s := strings.TrimSuffix(path, ".gcss") + ".css"
+		css, err := os.Create(filepath.Join(PUBDIR, s))
+		if err != nil {
+			return err
+		}
+		defer css.Close()
+		w = css
+	}
+	_, err = gcss.Compile(w, f)
+	return err
+}
+
+// Copies file as is from path to writer
+func buildRaw(path string, w io.Writer) error {
+	in, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-
-	defer f.Close()
-	defer css.Close()
-
-	_, err = gcss.Compile(css, f)
-	return err
-}
-
-// Copies file from working directory into public directory
-func copyFile(path string) (err error) {
-	var in, out *os.File
-	if in, err = os.Open(path); err == nil {
-		defer in.Close()
-		if out, err = os.Create(filepath.Join(PUBDIR, path)); err == nil {
+	defer in.Close()
+	if w == nil {
+		if out, err := os.Create(filepath.Join(PUBDIR, path)); err != nil {
+			return err
+		} else {
 			defer out.Close()
-			_, err = io.Copy(out, in)
+			w = out
 		}
 	}
+	_, err = io.Copy(w, in)
 	return err
 }
 
-func varFunc(s string) func() string {
-	return func() string {
-		return s
+func build(path string, w io.Writer, funcs Funcs, vars Vars) error {
+	ext := filepath.Ext(path)
+	if ext == ".md" || ext == ".mkd" {
+		return buildMarkdown(path, w, funcs, vars)
+	} else if ext == ".html" || ext == ".xml" {
+		return buildHTML(path, w, funcs, vars)
+	} else if ext == ".amber" {
+		return buildAmber(path, w, funcs, vars)
+	} else if ext == ".gcss" {
+		return buildGCSS(path, w)
+	} else {
+		return buildRaw(path, w)
 	}
 }
 
-func pluginFunc(cmd string) func() string {
-	return func() string {
-		return "Not implemented yet"
-	}
-}
-
-func createFuncs() template.FuncMap {
-	// Builtin functions
-	funcs := template.FuncMap{
-		"exec": func(s ...string) string {
-			// Run external command with arguments
-			return ""
-		},
-		"zs": func(args ...string) string {
-			// Run zs with arguments
-			return ""
-		},
-	}
-	// Plugin functions
-	files, _ := ioutil.ReadDir(ZSDIR)
-	for _, f := range files {
-		if !f.IsDir() {
-			name := f.Name()
-			if !strings.HasSuffix(name, ".html") && !strings.HasSuffix(name, ".amber") {
-				funcs[strings.TrimSuffix(name, filepath.Ext(name))] = pluginFunc(name)
-			}
-		}
-	}
-	return funcs
-}
-
-func renameExt(path, from, to string) string {
-	if from == "" {
-		from = filepath.Ext(path)
-	}
-	return strings.TrimSuffix(path, from) + to
-}
-
-func globals() Vars {
-	vars := Vars{}
-	for _, e := range os.Environ() {
-		pair := strings.Split(e, "=")
-		if strings.HasPrefix(pair[0], "ZS_") {
-			vars[strings.ToLower(pair[0][3:])] = pair[1]
-		}
-	}
-	return vars
-}
-
-func buildAll(once bool) {
+func buildAll(watch bool) {
 	lastModified := time.Unix(0, 0)
 	modified := false
 
 	vars := globals()
 	for {
 		os.Mkdir(PUBDIR, 0755)
-		funcs := createFuncs()
+		funcs := builtins()
 		err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
 			// ignore hidden files and directories
 			if filepath.Base(path)[0] == '.' || strings.HasPrefix(path, ".") {
@@ -320,23 +244,8 @@ func buildAll(once bool) {
 					run(filepath.Join(ZSDIR, "pre"), []string{}, nil, nil)
 					modified = true
 				}
-				ext := filepath.Ext(path)
-				if ext == ".md" || ext == ".mkd" {
-					log.Println("md: ", path)
-					return buildMarkdown(path, funcs, vars)
-				} else if ext == ".html" || ext == ".xml" {
-					log.Println("html: ", path)
-					return buildPlain(path, path, funcs, vars)
-				} else if ext == ".amber" {
-					log.Println("html: ", path)
-					return buildAmber(path, renameExt(path, ".amber", ".html"), funcs, vars)
-				} else if ext == ".gcss" {
-					log.Println("css: ", path)
-					return buildGCSS(path)
-				} else {
-					log.Println("raw: ", path)
-					return copyFile(path)
-				}
+				log.Println("build: ", path)
+				return build(path, nil, funcs, vars)
 			}
 			return nil
 		})
@@ -349,10 +258,10 @@ func buildAll(once bool) {
 			run(filepath.Join(ZSDIR, "post"), []string{}, nil, nil)
 			modified = false
 		}
-		lastModified = time.Now()
-		if once {
+		if !watch {
 			break
 		}
+		lastModified = time.Now()
 		time.Sleep(1 * time.Second)
 	}
 }
@@ -366,27 +275,23 @@ func main() {
 	args := os.Args[2:]
 	switch cmd {
 	case "build":
-		buildAll(true)
+		buildAll(false)
 	case "watch":
-		buildAll(false) // pass duration
-	case "var":
-		if len(args) == 0 {
-			log.Println("ERROR: filename expected")
-			return
-		}
-		if vars, _, err := md(args[0], globals()); err == nil {
-			if len(args) > 1 {
-				for _, a := range args[1:] {
-					fmt.Println(vars[a])
-				}
-			} else {
-				for k, v := range vars {
-					fmt.Println(k + ":" + v)
-				}
-			}
+		buildAll(true)
+	case "print":
+		if len(args) != 1 {
+			fmt.Println("ERROR: filename expected")
 		} else {
-			log.Println("ERROR:", err)
+			build(args[0], os.Stdout, builtins(), globals())
 		}
+	case "var":
+		fmt.Println(Var(args))
+	case "lorem":
+		fmt.Println(Lorem(args))
+	case "dateparse":
+		fmt.Println(DateParse(args))
+	case "datefmt":
+		fmt.Println(DateFmt(args))
 	default:
 		err := run(path.Join(ZSDIR, cmd), args, Vars{}, os.Stdout)
 		if err != nil {

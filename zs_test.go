@@ -6,10 +6,8 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
-	"text/template"
 )
 
 func TestSplit2(t *testing.T) {
@@ -78,7 +76,7 @@ this: is a content`), Vars{})
 
 func TestRender(t *testing.T) {
 	vars := map[string]string{"foo": "bar"}
-	funcs := template.FuncMap{
+	funcs := Funcs{
 		"greet": func(s ...string) string {
 			if len(s) == 0 {
 				return "hello"
@@ -135,24 +133,6 @@ func TestRun(t *testing.T) {
 	}
 	if out.String() != "foo\n" {
 		t.Error(out.String())
-	}
-}
-
-func TestEvalCommand(t *testing.T) {
-	s, err := eval([]string{"echo", "hello"}, map[string]string{})
-	if err != nil {
-		t.Error(err)
-	}
-	if s != "hello\n" {
-		t.Error(s)
-	}
-	_, err = eval([]string{"cat", "bogus/file"}, map[string]string{})
-	if _, ok := err.(*exec.ExitError); !ok {
-		t.Error("expected ExitError")
-	}
-	_, err = eval([]string{"missing command"}, map[string]string{})
-	if err != nil {
-		t.Error("missing command should be ignored")
 	}
 }
 
