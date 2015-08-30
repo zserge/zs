@@ -132,15 +132,16 @@ func buildHTML(path string, w io.Writer, funcs Funcs, vars Vars) error {
 	if err != nil {
 		return err
 	}
-	output := filepath.Join(PUBDIR, path)
-	if s, ok := vars["output"]; ok {
-		output = s
+	if w == nil {
+		f, err := os.Create(filepath.Join(PUBDIR, path))
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
 	}
-	err = ioutil.WriteFile(output, []byte(content), 0666)
-	if err != nil {
-		return err
-	}
-	return nil
+	_, err = io.WriteString(w, content)
+	return err
 }
 
 // Renders .amber file into .html
@@ -150,6 +151,15 @@ func buildAmber(path string, w io.Writer, funcs Funcs, vars Vars) error {
 	if err != nil {
 		return err
 	}
+
+	data := map[string]interface{}{}
+	for k, v := range vars {
+		data[k] = v
+	}
+	for k, v := range funcs {
+		data[k] = v
+	}
+
 	t, err := a.Compile()
 	if err != nil {
 		return err
@@ -162,7 +172,7 @@ func buildAmber(path string, w io.Writer, funcs Funcs, vars Vars) error {
 		defer f.Close()
 		w = f
 	}
-	return t.Execute(w, vars)
+	return t.Execute(w, data)
 }
 
 // Compiles .gcss into .css
@@ -275,15 +285,17 @@ func main() {
 	args := os.Args[2:]
 	switch cmd {
 	case "build":
-		buildAll(false)
+		if len(args) == 0 {
+			buildAll(false)
+		} else if len(args) == 1 {
+			if err := build(args[0], os.Stdout, builtins(), globals()); err != nil {
+				fmt.Println("ERROR: " + err.Error())
+			}
+		} else {
+			fmt.Println("ERROR: too many arguments")
+		}
 	case "watch":
 		buildAll(true)
-	case "print":
-		if len(args) != 1 {
-			fmt.Println("ERROR: filename expected")
-		} else {
-			build(args[0], os.Stdout, builtins(), globals())
-		}
 	case "var":
 		fmt.Println(Var(args))
 	case "lorem":

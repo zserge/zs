@@ -19,7 +19,7 @@ func varFunc(s string) func() string {
 func pluginFunc(cmd string, vars Vars) func(args ...string) string {
 	return func(args ...string) string {
 		out := bytes.NewBuffer(nil)
-		if err := run(cmd, args, vars, out); err != nil {
+		if err := run(filepath.Join(ZSDIR, cmd), args, vars, out); err != nil {
 			return cmd + ":" + err.Error()
 		} else {
 			return string(out.Bytes())
@@ -28,15 +28,19 @@ func pluginFunc(cmd string, vars Vars) func(args ...string) string {
 }
 
 func builtins() Funcs {
-	exec := func(s ...string) string {
+	exec := func(cmd string, args ...string) string {
+		out := bytes.NewBuffer(nil)
+		if err := run(cmd, args, Vars{}, out); err != nil {
+			return cmd + ":" + err.Error()
+		} else {
+			return string(out.Bytes())
+		}
 		return ""
 	}
 	return Funcs{
 		"exec": exec,
 		"zs": func(args ...string) string {
-			cmd := []string{"zs"}
-			cmd = append(cmd, args...)
-			return exec(cmd...)
+			return exec(os.Args[0], args...)
 		},
 	}
 }
