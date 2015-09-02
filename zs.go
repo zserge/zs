@@ -111,6 +111,9 @@ func getVars(path string, globals Vars) (Vars, string, error) {
 	} else {
 		v["layout"] = "layout.html"
 	}
+	title := strings.Replace(strings.Replace(path, "_", " ", -1), "-", " ", -1)
+	v["title"] = strings.ToTitle(title)
+	v["description"] = ""
 	v["file"] = path
 	v["url"] = path[:len(path)-len(filepath.Ext(path))] + ".html"
 	v["output"] = filepath.Join(PUBDIR, v["url"])
@@ -129,7 +132,6 @@ func getVars(path string, globals Vars) (Vars, string, error) {
 		} else {
 			for key, value := range vars {
 				v[key] = value
-				log.Println(key, value)
 			}
 		}
 		if strings.HasPrefix(v["url"], "./") {
@@ -324,14 +326,14 @@ func buildAll(watch bool) {
 	vars := globals()
 	for {
 		os.Mkdir(PUBDIR, 0755)
-		err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
 			// ignore hidden files and directories
 			if filepath.Base(path)[0] == '.' || strings.HasPrefix(path, ".") {
 				return nil
 			}
 			// inform user about fs walk errors, but continue iteration
 			if err != nil {
-				log.Println("ERROR:", err)
+				fmt.Println("error:", err)
 				return nil
 			}
 
@@ -349,9 +351,6 @@ func buildAll(watch bool) {
 			}
 			return nil
 		})
-		if err != nil {
-			log.Println("ERROR:", err)
-		}
 		if modified {
 			// At least one file in this build cycle has been modified
 			run(vars, "posthook")
