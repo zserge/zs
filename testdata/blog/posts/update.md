@@ -1,5 +1,6 @@
 title: Second post
 date: 29-08-2015
+---
 
 # {{title}}
 

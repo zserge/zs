@@ -53,7 +53,7 @@ func TestVars(t *testing.T) {
 		`
 foo: bar
 title: Hello, world!
-
+---
 Some content in markdown
 `: Vars{
 			"foo":       "bar",
@@ -63,8 +63,9 @@ Some content in markdown
 			"output":    filepath.Join(PUBDIR, "test.html"),
 			"__content": "Some content in markdown\n",
 		},
-		`url: "example.com/foo.html"
-
+		`
+url: "example.com/foo.html"
+---
 Hello
 `: Vars{
 			"url":       "example.com/foo.html",

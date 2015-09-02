@@ -16,7 +16,7 @@ import (
 	"github.com/eknkc/amber"
 	"github.com/russross/blackfriday"
 	"github.com/yosssi/gcss"
-	"gopkg.in/yaml.v1"
+	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -115,17 +115,21 @@ func getVars(path string, globals Vars) (Vars, string, error) {
 	v["url"] = path[:len(path)-len(filepath.Ext(path))] + ".html"
 	v["output"] = filepath.Join(PUBDIR, v["url"])
 
-	if sep := strings.Index(s, "\n\n"); sep == -1 {
+	delim := "\n---\n"
+	if sep := strings.Index(s, delim); sep == -1 {
 		return v, s, nil
 	} else {
 		header := s[:sep]
-		body := s[sep+len("\n\n"):]
+		body := s[sep+len(delim):]
+
 		vars := Vars{}
 		if err := yaml.Unmarshal([]byte(header), &vars); err != nil {
 			fmt.Println("ERROR: failed to parse header", err)
+			return nil, "", err
 		} else {
 			for key, value := range vars {
 				v[key] = value
+				log.Println(key, value)
 			}
 		}
 		if strings.HasPrefix(v["url"], "./") {
@@ -226,12 +230,9 @@ func buildAmber(path string, w io.Writer, vars Vars) error {
 	if err != nil {
 		return err
 	}
-	if body, err = render(body, v); err != nil {
-		return err
-	}
-
 	a := amber.New()
 	if err := a.Parse(body); err != nil {
+		fmt.Println(body)
 		return err
 	}
 
@@ -239,6 +240,16 @@ func buildAmber(path string, w io.Writer, vars Vars) error {
 	if err != nil {
 		return err
 	}
+
+	htmlBuf := &bytes.Buffer{}
+	if err := t.Execute(htmlBuf, v); err != nil {
+		return err
+	}
+
+	if body, err = render(string(htmlBuf.Bytes()), v); err != nil {
+		return err
+	}
+
 	if w == nil {
 		f, err := os.Create(filepath.Join(PUBDIR, renameExt(path, ".amber", ".html")))
 		if err != nil {
@@ -247,7 +258,8 @@ func buildAmber(path string, w io.Writer, vars Vars) error {
 		defer f.Close()
 		w = f
 	}
-	return t.Execute(w, vars)
+	_, err = io.WriteString(w, body)
+	return err
 }
 
 // Compiles .gcss into .css
