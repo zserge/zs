@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,72 @@ const (
 )
 
 type Vars map[string]string
-type Funcs template.FuncMap
+
+func renameExt(path, from, to string) string {
+	if from == "" {
+		from = filepath.Ext(path)
+	}
+	if strings.HasSuffix(path, from) {
+		return strings.TrimSuffix(path, from) + to
+	} else {
+		return path
+	}
+}
+
+func globals() Vars {
+	vars := Vars{}
+	for _, e := range os.Environ() {
+		pair := strings.Split(e, "=")
+		if strings.HasPrefix(pair[0], "ZS_") {
+			vars[strings.ToLower(pair[0][3:])] = pair[1]
+		}
+	}
+	return vars
+}
+
+// Converts zs markdown variables into environment variables
+func env(vars Vars) []string {
+	env := []string{"ZS=" + os.Args[0], "ZS_OUTDIR=" + PUBDIR}
+	env = append(env, os.Environ()...)
+	if vars != nil {
+		for k, v := range vars {
+			env = append(env, "ZS_"+strings.ToUpper(k)+"="+v)
+		}
+	}
+	return env
+}
+
+// Runs command with given arguments and variables, intercepts stderr and
+// redirects stdout into the given writer
+func run(cmd string, args []string, vars Vars, output io.Writer) error {
+	var errbuf bytes.Buffer
+	c := exec.Command(cmd, args...)
+	c.Env = env(vars)
+	c.Stdout = output
+	c.Stderr = &errbuf
+
+	err := c.Run()
+
+	if errbuf.Len() > 0 {
+		log.Println("ERROR:", errbuf.String())
+	}
+
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// Splits a string in exactly two parts by delimiter
+// If no delimiter is found - the second string is be empty
+func split2(s, delim string) (string, string) {
+	parts := strings.SplitN(s, delim, 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	} else {
+		return parts[0], ""
+	}
+}
 
 // Parses markdown content. Returns parsed header variables and content
 func md(path string, globals Vars) (Vars, string, error) {
@@ -66,9 +132,8 @@ func md(path string, globals Vars) (Vars, string, error) {
 }
 
 // Use standard Go templates
-func render(s string, funcs Funcs, vars Vars) (string, error) {
-	f := makeFuncs(funcs, vars)
-	tmpl, err := template.New("").Funcs(template.FuncMap(f)).Parse(s)
+func render(s string, vars Vars) (string, error) {
+	tmpl, err := template.New("").Parse(s)
 	if err != nil {
 		return "", err
 	}
@@ -80,12 +145,12 @@ func render(s string, funcs Funcs, vars Vars) (string, error) {
 }
 
 // Renders markdown with the given layout into html expanding all the macros
-func buildMarkdown(path string, w io.Writer, funcs Funcs, vars Vars) error {
+func buildMarkdown(path string, w io.Writer, vars Vars) error {
 	v, body, err := md(path, vars)
 	if err != nil {
 		return err
 	}
-	content, err := render(body, funcs, v)
+	content, err := render(body, v)
 	if err != nil {
 		return err
 	}
@@ -99,19 +164,19 @@ func buildMarkdown(path string, w io.Writer, funcs Funcs, vars Vars) error {
 		w = out
 	}
 	if strings.HasSuffix(v["layout"], ".amber") {
-		return buildAmber(filepath.Join(ZSDIR, v["layout"]), w, funcs, v)
+		return buildAmber(filepath.Join(ZSDIR, v["layout"]), w, v)
 	} else {
-		return buildHTML(filepath.Join(ZSDIR, v["layout"]), w, funcs, v)
+		return buildHTML(filepath.Join(ZSDIR, v["layout"]), w, v)
 	}
 }
 
 // Renders text file expanding all variable macros inside it
-func buildHTML(path string, w io.Writer, funcs Funcs, vars Vars) error {
+func buildHTML(path string, w io.Writer, vars Vars) error {
 	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	content, err := render(string(b), funcs, vars)
+	content, err := render(string(b), vars)
 	if err != nil {
 		return err
 	}
@@ -128,7 +193,7 @@ func buildHTML(path string, w io.Writer, funcs Funcs, vars Vars) error {
 }
 
 // Renders .amber file into .html
-func buildAmber(path string, w io.Writer, funcs Funcs, vars Vars) error {
+func buildAmber(path string, w io.Writer, vars Vars) error {
 	a := amber.New()
 	err := a.ParseFile(path)
 	if err != nil {
@@ -137,9 +202,6 @@ func buildAmber(path string, w io.Writer, funcs Funcs, vars Vars) error {
 
 	data := map[string]interface{}{}
 	for k, v := range vars {
-		data[k] = v
-	}
-	for k, v := range makeFuncs(funcs, Vars{}) {
 		data[k] = v
 	}
 
@@ -198,14 +260,14 @@ func buildRaw(path string, w io.Writer) error {
 	return err
 }
 
-func build(path string, w io.Writer, funcs Funcs, vars Vars) error {
+func build(path string, w io.Writer, vars Vars) error {
 	ext := filepath.Ext(path)
 	if ext == ".md" || ext == ".mkd" {
-		return buildMarkdown(path, w, funcs, vars)
+		return buildMarkdown(path, w, vars)
 	} else if ext == ".html" || ext == ".xml" {
-		return buildHTML(path, w, funcs, vars)
+		return buildHTML(path, w, vars)
 	} else if ext == ".amber" {
-		return buildAmber(path, w, funcs, vars)
+		return buildAmber(path, w, vars)
 	} else if ext == ".gcss" {
 		return buildGCSS(path, w)
 	} else {
@@ -220,7 +282,6 @@ func buildAll(watch bool) {
 	vars := globals()
 	for {
 		os.Mkdir(PUBDIR, 0755)
-		funcs := builtins()
 		err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
 			// ignore hidden files and directories
 			if filepath.Base(path)[0] == '.' || strings.HasPrefix(path, ".") {
@@ -243,7 +304,7 @@ func buildAll(watch bool) {
 					modified = true
 				}
 				log.Println("build: ", path)
-				return build(path, nil, funcs, vars)
+				return build(path, nil, vars)
 			}
 			return nil
 		})
@@ -276,7 +337,7 @@ func main() {
 		if len(args) == 0 {
 			buildAll(false)
 		} else if len(args) == 1 {
-			if err := build(args[0], os.Stdout, builtins(), globals()); err != nil {
+			if err := build(args[0], os.Stdout, globals()); err != nil {
 				fmt.Println("ERROR: " + err.Error())
 			}
 		} else {
@@ -285,23 +346,25 @@ func main() {
 	case "watch":
 		buildAll(true)
 	case "var":
-		fmt.Println(Var(args...))
-	case "lorem":
-		fmt.Println(Lorem(args...))
-	case "dateparse":
-		fmt.Println(DateParse(args...))
-	case "datefmt":
-		fmt.Println(DateFmt(args...))
-	case "wc":
-		fmt.Println(WordCount(args...))
-	case "ttr":
-		fmt.Println(TimeToRead(args...))
-	case "ls":
-		fmt.Println(strings.Join(List(args...), "\n"))
-	case "sort":
-		fmt.Println(strings.Join(Sort(args...), "\n"))
-	case "exec":
-		// TODO
+		if len(args) == 0 {
+			fmt.Println("var: filename expected")
+		} else {
+			s := ""
+			if vars, _, err := md(args[0], globals()); err != nil {
+				fmt.Println("var: " + err.Error())
+			} else {
+				if len(args) > 1 {
+					for _, a := range args[1:] {
+						s = s + vars[a] + "\n"
+					}
+				} else {
+					for k, v := range vars {
+						s = s + k + ":" + v + "\n"
+					}
+				}
+			}
+			fmt.Println(strings.TrimSpace(s))
+		}
 	default:
 		err := run(path.Join(ZSDIR, cmd), args, globals(), os.Stdout)
 		if err != nil {
