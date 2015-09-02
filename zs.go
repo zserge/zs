@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -17,6 +16,7 @@ import (
 	"github.com/eknkc/amber"
 	"github.com/russross/blackfriday"
 	"github.com/yosssi/gcss"
+	"gopkg.in/yaml.v1"
 )
 
 const (
@@ -26,17 +26,22 @@ const (
 
 type Vars map[string]string
 
-func renameExt(path, from, to string) string {
-	if from == "" {
-		from = filepath.Ext(path)
+// renameExt renames extension (if any) from oldext to newext
+// If oldext is an empty string - extension is extracted automatically.
+// If path has no extension - new extension is appended
+func renameExt(path, oldext, newext string) string {
+	if oldext == "" {
+		oldext = filepath.Ext(path)
 	}
-	if strings.HasSuffix(path, from) {
-		return strings.TrimSuffix(path, from) + to
+	if oldext == "" || strings.HasSuffix(path, oldext) {
+		return strings.TrimSuffix(path, oldext) + newext
 	} else {
 		return path
 	}
 }
 
+// globals returns list of global OS environment variables that start
+// with ZS_ prefix as Vars, so the values can be used inside templates
 func globals() Vars {
 	vars := Vars{}
 	for _, e := range os.Environ() {
@@ -48,25 +53,28 @@ func globals() Vars {
 	return vars
 }
 
-// Converts zs markdown variables into environment variables
-func env(vars Vars) []string {
+// run executes a command or a script. Vars define the command environment,
+// each zs var is converted into OS environemnt variable with ZS_ prefix
+// prepended.  Additional variable $ZS contains path to the zs binary. Command
+// stderr is printed to zs stderr, command output is returned as a string.
+func run(vars Vars, cmd string, args ...string) (string, error) {
+	// First check if partial exists (.amber or .html)
+	if b, err := ioutil.ReadFile(filepath.Join(ZSDIR, cmd+".amber")); err == nil {
+		return string(b), nil
+	}
+	if b, err := ioutil.ReadFile(filepath.Join(ZSDIR, cmd+".html")); err == nil {
+		return string(b), nil
+	}
+
+	var errbuf, outbuf bytes.Buffer
+	c := exec.Command(cmd, args...)
 	env := []string{"ZS=" + os.Args[0], "ZS_OUTDIR=" + PUBDIR}
 	env = append(env, os.Environ()...)
-	if vars != nil {
-		for k, v := range vars {
-			env = append(env, "ZS_"+strings.ToUpper(k)+"="+v)
-		}
+	for k, v := range vars {
+		env = append(env, "ZS_"+strings.ToUpper(k)+"="+v)
 	}
-	return env
-}
-
-// Runs command with given arguments and variables, intercepts stderr and
-// redirects stdout into the given writer
-func run(cmd string, args []string, vars Vars, output io.Writer) error {
-	var errbuf bytes.Buffer
-	c := exec.Command(cmd, args...)
-	c.Env = env(vars)
-	c.Stdout = output
+	c.Env = env
+	c.Stdout = &outbuf
 	c.Stderr = &errbuf
 
 	err := c.Run()
@@ -74,79 +82,97 @@ func run(cmd string, args []string, vars Vars, output io.Writer) error {
 	if errbuf.Len() > 0 {
 		log.Println("ERROR:", errbuf.String())
 	}
-
 	if err != nil {
-		return err
+		return "", err
 	}
-	return nil
+	return string(outbuf.Bytes()), nil
 }
 
-// Splits a string in exactly two parts by delimiter
-// If no delimiter is found - the second string is be empty
-func split2(s, delim string) (string, string) {
-	parts := strings.SplitN(s, delim, 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	} else {
-		return parts[0], ""
-	}
-}
-
-// Parses markdown content. Returns parsed header variables and content
-func md(path string, globals Vars) (Vars, string, error) {
+// getVars returns list of variables defined in a text file and actual file
+// content following the variables declaration. Header is separated from
+// content by an empty line. Header can be either YAML or JSON.
+// If no empty newline is found - file is treated as content-only.
+func getVars(path string, globals Vars) (Vars, string, error) {
 	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, "", err
 	}
 	s := string(b)
-	url := path[:len(path)-len(filepath.Ext(path))] + ".html"
-	v := Vars{
-		"title":       "",
-		"description": "",
-		"keywords":    "",
-	}
+
+	// Copy globals first
+	v := Vars{}
 	for name, value := range globals {
 		v[name] = value
 	}
+
+	// Override them by default values extracted from file name/path
 	if _, err := os.Stat(filepath.Join(ZSDIR, "layout.amber")); err == nil {
 		v["layout"] = "layout.amber"
 	} else {
 		v["layout"] = "layout.html"
 	}
 	v["file"] = path
-	v["url"] = url
-	v["output"] = filepath.Join(PUBDIR, url)
+	v["url"] = path[:len(path)-len(filepath.Ext(path))] + ".html"
+	v["output"] = filepath.Join(PUBDIR, v["url"])
 
-	if strings.Index(s, "\n\n") == -1 {
+	if sep := strings.Index(s, "\n\n"); sep == -1 {
 		return v, s, nil
+	} else {
+		header := s[:sep]
+		body := s[sep+len("\n\n"):]
+		vars := Vars{}
+		if err := yaml.Unmarshal([]byte(header), &vars); err != nil {
+			fmt.Println("ERROR: failed to parse header", err)
+		} else {
+			for key, value := range vars {
+				v[key] = value
+			}
+		}
+		if strings.HasPrefix(v["url"], "./") {
+			v["url"] = v["url"][2:]
+		}
+		return v, body, nil
 	}
-	header, body := split2(s, "\n\n")
-	for _, line := range strings.Split(header, "\n") {
-		key, value := split2(line, ":")
-		v[strings.ToLower(strings.TrimSpace(key))] = strings.TrimSpace(value)
-	}
-	if strings.HasPrefix(v["url"], "./") {
-		v["url"] = v["url"][2:]
-	}
-	return v, body, nil
 }
 
-// Use standard Go templates
+// Render expanding zs plugins and variables
 func render(s string, vars Vars) (string, error) {
-	tmpl, err := template.New("").Parse(s)
-	if err != nil {
-		return "", err
-	}
+	delim_open := "{{"
+	delim_close := "}}"
+
 	out := &bytes.Buffer{}
-	if err := tmpl.Execute(out, vars); err != nil {
-		return "", err
+	for {
+		if from := strings.Index(s, delim_open); from == -1 {
+			out.WriteString(s)
+			return out.String(), nil
+		} else {
+			if to := strings.Index(s, delim_close); to == -1 {
+				return "", fmt.Errorf("Close delim not found")
+			} else {
+				out.WriteString(s[:from])
+				cmd := s[from+len(delim_open) : to]
+				s = s[to+len(delim_close):]
+				m := strings.Fields(cmd)
+				if len(m) == 1 {
+					if v, ok := vars[m[0]]; ok {
+						out.WriteString(v)
+						continue
+					}
+				}
+				if res, err := run(vars, m[0], m[1:]...); err == nil {
+					out.WriteString(res)
+				} else {
+					fmt.Println(err)
+				}
+			}
+		}
 	}
-	return string(out.Bytes()), nil
+	return s, nil
 }
 
 // Renders markdown with the given layout into html expanding all the macros
 func buildMarkdown(path string, w io.Writer, vars Vars) error {
-	v, body, err := md(path, vars)
+	v, body, err := getVars(path, vars)
 	if err != nil {
 		return err
 	}
@@ -172,11 +198,14 @@ func buildMarkdown(path string, w io.Writer, vars Vars) error {
 
 // Renders text file expanding all variable macros inside it
 func buildHTML(path string, w io.Writer, vars Vars) error {
-	b, err := ioutil.ReadFile(path)
+	v, body, err := getVars(path, vars)
 	if err != nil {
 		return err
 	}
-	content, err := render(string(b), vars)
+	if body, err = render(body, v); err != nil {
+		return err
+	}
+	tmpl, err := template.New("").Delims("<%", "%>").Parse(body)
 	if err != nil {
 		return err
 	}
@@ -188,21 +217,22 @@ func buildHTML(path string, w io.Writer, vars Vars) error {
 		defer f.Close()
 		w = f
 	}
-	_, err = io.WriteString(w, content)
-	return err
+	return tmpl.Execute(w, vars)
 }
 
 // Renders .amber file into .html
 func buildAmber(path string, w io.Writer, vars Vars) error {
-	a := amber.New()
-	err := a.ParseFile(path)
+	v, body, err := getVars(path, vars)
 	if err != nil {
 		return err
 	}
+	if body, err = render(body, v); err != nil {
+		return err
+	}
 
-	data := map[string]interface{}{}
-	for k, v := range vars {
-		data[k] = v
+	a := amber.New()
+	if err := a.Parse(body); err != nil {
+		return err
 	}
 
 	t, err := a.Compile()
@@ -217,7 +247,7 @@ func buildAmber(path string, w io.Writer, vars Vars) error {
 		defer f.Close()
 		w = f
 	}
-	return t.Execute(w, data)
+	return t.Execute(w, vars)
 }
 
 // Compiles .gcss into .css
@@ -298,12 +328,11 @@ func buildAll(watch bool) {
 				return nil
 			} else if info.ModTime().After(lastModified) {
 				if !modified {
-					// About to be modified, so run pre-build hook
-					// FIXME on windows it might not work well
-					run(filepath.Join(ZSDIR, "pre"), []string{}, nil, nil)
+					// First file in this build cycle is about to be modified
+					run(vars, "prehook")
 					modified = true
 				}
-				log.Println("build: ", path)
+				log.Println("build:", path)
 				return build(path, nil, vars)
 			}
 			return nil
@@ -312,9 +341,8 @@ func buildAll(watch bool) {
 			log.Println("ERROR:", err)
 		}
 		if modified {
-			// Something was modified, so post-build hook
-			// FIXME on windows it might not work well
-			run(filepath.Join(ZSDIR, "post"), []string{}, nil, nil)
+			// At least one file in this build cycle has been modified
+			run(vars, "posthook")
 			modified = false
 		}
 		if !watch {
@@ -323,6 +351,13 @@ func buildAll(watch bool) {
 		lastModified = time.Now()
 		time.Sleep(1 * time.Second)
 	}
+}
+
+func init() {
+	// prepend .zs to $PATH, so plugins will be found before OS commands
+	p := os.Getenv("PATH")
+	p = ZSDIR + ":" + p
+	os.Setenv("PATH", p)
 }
 
 func main() {
@@ -350,7 +385,7 @@ func main() {
 			fmt.Println("var: filename expected")
 		} else {
 			s := ""
-			if vars, _, err := md(args[0], globals()); err != nil {
+			if vars, _, err := getVars(args[0], globals()); err != nil {
 				fmt.Println("var: " + err.Error())
 			} else {
 				if len(args) > 1 {
@@ -366,9 +401,10 @@ func main() {
 			fmt.Println(strings.TrimSpace(s))
 		}
 	default:
-		err := run(path.Join(ZSDIR, cmd), args, globals(), os.Stdout)
-		if err != nil {
-			log.Println("ERROR:", err)
+		if s, err := run(globals(), cmd, args...); err != nil {
+			fmt.Println(err)
+		} else {
+			fmt.Println(s)
 		}
 	}
 }

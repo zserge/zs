@@ -1,146 +1,107 @@
 package main
 
 import (
-	"bytes"
-	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
-	"strings"
+	"path/filepath"
 	"testing"
 )
 
-func TestSplit2(t *testing.T) {
-	if a, b := split2("a:b", ":"); a != "a" || b != "b" {
-		t.Fail()
+func TestRenameExt(t *testing.T) {
+	if s := renameExt("foo.amber", ".amber", ".html"); s != "foo.html" {
+		t.Error(s)
 	}
-	if a, b := split2(":b", ":"); a != "" || b != "b" {
-		t.Fail()
+	if s := renameExt("foo.amber", "", ".html"); s != "foo.html" {
+		t.Error(s)
 	}
-	if a, b := split2("a:", ":"); a != "a" || b != "" {
-		t.Fail()
+	if s := renameExt("foo.amber", ".md", ".html"); s != "foo.amber" {
+		t.Error(s)
 	}
-	if a, b := split2(":", ":"); a != "" || b != "" {
-		t.Fail()
+	if s := renameExt("foo", ".amber", ".html"); s != "foo" {
+		t.Error(s)
 	}
-	if a, b := split2("a", ":"); a != "a" || b != "" {
-		t.Fail()
-	}
-	if a, b := split2("", ":"); a != "" || b != "" {
-		t.Fail()
+	if s := renameExt("foo", "", ".html"); s != "foo.html" {
+		t.Error(s)
 	}
 }
 
-func tmpfile(path, s string) string {
-	ioutil.WriteFile(path, []byte(s), 0644)
-	return path
+func TestRun(t *testing.T) {
+	// external command
+	if s, err := run(Vars{}, "echo", "hello"); err != nil || s != "hello\n" {
+		t.Error(s, err)
+	}
+	// passing variables to plugins
+	if s, err := run(Vars{"foo": "bar"}, "sh", "-c", "echo $ZS_FOO"); err != nil || s != "bar\n" {
+		t.Error(s, err)
+	}
+
+	// custom plugin overriding external command
+	os.Mkdir(ZSDIR, 0755)
+	script := `#!/bin/sh
+echo foo
+`
+	ioutil.WriteFile(filepath.Join(ZSDIR, "echo"), []byte(script), 0755)
+	if s, err := run(Vars{}, "echo", "hello"); err != nil || s != "foo\n" {
+		t.Error(s, err)
+	}
+	os.Remove(filepath.Join(ZSDIR, "echo"))
+	os.Remove(ZSDIR)
 }
 
-func TestMD(t *testing.T) {
-	defer os.Remove("foo.md")
-	v, body, _ := md(tmpfile("foo.md", `
-	title: Hello, world!
-	keywords: foo, bar, baz
-	empty:
-	bayan: [:|||:]
+func TestVars(t *testing.T) {
+	tests := map[string]Vars{
+		`
+foo: bar
+title: Hello, world!
 
-this: is a content`), Vars{})
-	if v["title"] != "Hello, world!" {
-		t.Error()
-	}
-	if v["keywords"] != "foo, bar, baz" {
-		t.Error()
-	}
-	if s, ok := v["empty"]; !ok || len(s) != 0 {
-		t.Error()
-	}
-	if v["bayan"] != "[:|||:]" {
-		t.Error()
-	}
-	if body != "this: is a content" {
-		t.Error(body)
-	}
+Some content in markdown
+`: Vars{
+			"foo":       "bar",
+			"title":     "Hello, world!",
+			"url":       "test.html",
+			"file":      "test.md",
+			"output":    filepath.Join(PUBDIR, "test.html"),
+			"__content": "Some content in markdown\n",
+		},
+		`url: "example.com/foo.html"
 
-	// Test empty md
-	v, body, _ = md(tmpfile("foo.md", ""), Vars{})
-	if v["url"] != "foo.html" || len(body) != 0 {
-		t.Error(v, body)
+Hello
+`: Vars{
+			"url":       "example.com/foo.html",
+			"__content": "Hello\n",
+		},
 	}
 
-	// Test empty header
-	v, body, _ = md(tmpfile("foo.md", "Hello"), Vars{})
-	if v["url"] != "foo.html" || body != "Hello" {
-		t.Error(v, body)
+	for script, vars := range tests {
+		ioutil.WriteFile("test.md", []byte(script), 0644)
+		if v, s, err := getVars("test.md", Vars{"baz": "123"}); err != nil {
+			t.Error(err)
+		} else if s != vars["__content"] {
+			t.Error(s, vars["__content"])
+		} else {
+			for key, value := range vars {
+				if key != "__content" && v[key] != value {
+					t.Error(key, v[key], value)
+				}
+			}
+		}
 	}
 }
 
 func TestRender(t *testing.T) {
 	vars := map[string]string{"foo": "bar"}
-	funcs := Funcs{
-		"greet": func(s ...string) string {
-			if len(s) == 0 {
-				return "hello"
-			} else {
-				return "hello " + strings.Join(s, " ")
-			}
-		},
-	}
 
-	if s, err := render("plain text", funcs, vars); err != nil || s != "plain text" {
-		t.Error(s, err)
+	if s, _ := render("foo bar", vars); s != "foo bar" {
+		t.Error(s)
 	}
-	if s, err := render("a {{greet}} text", funcs, vars); err != nil || s != "a hello text" {
-		t.Error(s, err)
+	if s, _ := render("a {{printf short}} text", vars); s != "a short text" {
+		t.Error(s)
 	}
-	if s, err := render("{{greet}} x{{foo}}z", funcs, vars); err != nil || s != "hello xbarz" {
-		t.Error(s, err)
+	if s, _ := render("{{printf Hello}} x{{foo}}z", vars); s != "Hello xbarz" {
+		t.Error(s)
 	}
 	// Test error case
-	if s, err := render("a {{greet text ", funcs, vars); err == nil || len(s) != 0 {
-		t.Error(s, err)
+	if _, err := render("a {{greet text ", vars); err == nil {
+		t.Error("error expected")
 	}
-}
-
-func TestEnv(t *testing.T) {
-	e := env(map[string]string{"foo": "bar", "baz": "hello world"})
-	mustHave := []string{"ZS=" + os.Args[0], "ZS_FOO=bar", "ZS_BAZ=hello world", "PATH="}
-	for _, s := range mustHave {
-		found := false
-		for _, v := range e {
-			if strings.HasPrefix(v, s) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Error("Missing", s)
-		}
-	}
-}
-
-func TestRun(t *testing.T) {
-	out := bytes.NewBuffer(nil)
-	err := run("some_unbelievable_command_name", []string{}, map[string]string{}, out)
-	if err == nil {
-		t.Error()
-	}
-
-	out = bytes.NewBuffer(nil)
-	err = run(os.Args[0], []string{"-test.run=TestHelperProcess"},
-		map[string]string{"helper": "1", "out": "foo", "err": "bar"}, out)
-	if err != nil {
-		t.Error(err)
-	}
-	if out.String() != "foo\n" {
-		t.Error(out.String())
-	}
-}
-
-func TestHelperProcess(*testing.T) {
-	if os.Getenv("ZS_HELPER") != "1" {
-		return
-	}
-	defer os.Exit(0)                 // TODO check exit code
-	log.Println(os.Getenv("ZS_ERR")) // stderr
-	fmt.Println(os.Getenv("ZS_OUT")) // stdout
 }
