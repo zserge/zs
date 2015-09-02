@@ -3,12 +3,36 @@ package main
 import (
 	"bytes"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
+
+func makeFuncs(funcs Funcs, vars Vars) Funcs {
+	f := Funcs{}
+	for k, v := range funcs {
+		f[k] = v
+	}
+	for k, v := range vars {
+		f[k] = varFunc(v)
+	}
+	// Plugin functions
+	files, _ := ioutil.ReadDir(ZSDIR)
+	for _, file := range files {
+		if !file.IsDir() {
+			name := file.Name()
+			if !strings.HasSuffix(name, ".html") && !strings.HasSuffix(name, ".amber") {
+				f[renameExt(name, "", "")] = pluginFunc(name, vars)
+			} else {
+				f[renameExt(name, "", "")] = partialFunc(name, f, vars)
+			}
+		}
+	}
+	return f
+}
 
 func varFunc(s string) func() string {
 	return func() string {
@@ -27,6 +51,22 @@ func pluginFunc(cmd string, vars Vars) func(args ...string) string {
 	}
 }
 
+func partialFunc(name string, funcs Funcs, vars Vars) func() string {
+	return func() string {
+		var err error
+		w := bytes.NewBuffer(nil)
+		if strings.HasSuffix(name, ".amber") {
+			err = buildAmber(filepath.Join(ZSDIR, name), w, funcs, vars)
+		} else {
+			err = buildHTML(filepath.Join(ZSDIR, name), w, funcs, vars)
+		}
+		if err != nil {
+			return name + ":" + err.Error()
+		}
+		return string(w.Bytes())
+	}
+}
+
 func builtins() Funcs {
 	exec := func(cmd string, args ...string) string {
 		out := bytes.NewBuffer(nil)
@@ -38,9 +78,20 @@ func builtins() Funcs {
 		return ""
 	}
 	return Funcs{
-		"exec": exec,
-		"zs": func(args ...string) string {
-			return exec(os.Args[0], args...)
+		"exec":      exec,
+		"var":       Var,
+		"lorem":     Lorem,
+		"dateparse": DateParse,
+		"datefmt":   DateFmt,
+		"wc":        WordCount,
+		"ttr":       TimeToRead,
+		"ls":        List,
+		"...": func(args ...string) []string {
+			return append([]string{"..."}, args...)
+		},
+		"sort": func(args ...string) []string {
+
+			return Sort(args...)
 		},
 	}
 }

@@ -67,24 +67,7 @@ func md(path string, globals Vars) (Vars, string, error) {
 
 // Use standard Go templates
 func render(s string, funcs Funcs, vars Vars) (string, error) {
-	f := Funcs{}
-	for k, v := range funcs {
-		f[k] = v
-	}
-	for k, v := range vars {
-		f[k] = varFunc(v)
-	}
-	// Plugin functions
-	files, _ := ioutil.ReadDir(ZSDIR)
-	for _, file := range files {
-		if !file.IsDir() {
-			name := file.Name()
-			if !strings.HasSuffix(name, ".html") && !strings.HasSuffix(name, ".amber") {
-				f[strings.TrimSuffix(name, filepath.Ext(name))] = pluginFunc(name, vars)
-			}
-		}
-	}
-
+	f := makeFuncs(funcs, vars)
 	tmpl, err := template.New("").Funcs(template.FuncMap(f)).Parse(s)
 	if err != nil {
 		return "", err
@@ -106,7 +89,7 @@ func buildMarkdown(path string, w io.Writer, funcs Funcs, vars Vars) error {
 	if err != nil {
 		return err
 	}
-	v["content"] = string(blackfriday.MarkdownBasic([]byte(content)))
+	v["content"] = string(blackfriday.MarkdownCommon([]byte(content)))
 	if w == nil {
 		out, err := os.Create(filepath.Join(PUBDIR, renameExt(path, "", ".html")))
 		if err != nil {
@@ -156,7 +139,7 @@ func buildAmber(path string, w io.Writer, funcs Funcs, vars Vars) error {
 	for k, v := range vars {
 		data[k] = v
 	}
-	for k, v := range funcs {
+	for k, v := range makeFuncs(funcs, Vars{}) {
 		data[k] = v
 	}
 
@@ -302,17 +285,23 @@ func main() {
 	case "watch":
 		buildAll(true)
 	case "var":
-		fmt.Println(Var(args))
+		fmt.Println(Var(args...))
 	case "lorem":
-		fmt.Println(Lorem(args))
+		fmt.Println(Lorem(args...))
 	case "dateparse":
-		fmt.Println(DateParse(args))
+		fmt.Println(DateParse(args...))
 	case "datefmt":
-		fmt.Println(DateFmt(args))
+		fmt.Println(DateFmt(args...))
 	case "wc":
-		fmt.Println(WordCount(args))
-	case "timetoread":
-		fmt.Println(TimeToRead(args))
+		fmt.Println(WordCount(args...))
+	case "ttr":
+		fmt.Println(TimeToRead(args...))
+	case "ls":
+		fmt.Println(strings.Join(List(args...), "\n"))
+	case "sort":
+		fmt.Println(strings.Join(Sort(args...), "\n"))
+	case "exec":
+		// TODO
 	default:
 		err := run(path.Join(ZSDIR, cmd), args, globals(), os.Stdout)
 		if err != nil {
