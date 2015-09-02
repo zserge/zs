@@ -99,21 +99,23 @@ func getVars(path string, globals Vars) (Vars, string, error) {
 	}
 	s := string(b)
 
-	// Copy globals first
+	// Pick some default values for content-dependent variables
 	v := Vars{}
+	title := strings.Replace(strings.Replace(path, "_", " ", -1), "-", " ", -1)
+	v["title"] = strings.ToTitle(title)
+	v["description"] = ""
+
+	// Copy globals (will override title and description for markdown layouts
 	for name, value := range globals {
 		v[name] = value
 	}
 
-	// Override them by default values extracted from file name/path
+	// Add default values extracted from file name/path
 	if _, err := os.Stat(filepath.Join(ZSDIR, "layout.amber")); err == nil {
 		v["layout"] = "layout.amber"
 	} else {
 		v["layout"] = "layout.html"
 	}
-	title := strings.Replace(strings.Replace(path, "_", " ", -1), "-", " ", -1)
-	v["title"] = strings.ToTitle(title)
-	v["description"] = ""
 	v["file"] = path
 	v["url"] = path[:len(path)-len(filepath.Ext(path))] + ".html"
 	v["output"] = filepath.Join(PUBDIR, v["url"])
