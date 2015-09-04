@@ -104,21 +104,23 @@ func getVars(path string, globals Vars) (Vars, string, error) {
 	title := strings.Replace(strings.Replace(path, "_", " ", -1), "-", " ", -1)
 	v["title"] = strings.ToTitle(title)
 	v["description"] = ""
+	v["file"] = path
+	v["url"] = path[:len(path)-len(filepath.Ext(path))] + ".html"
+	v["output"] = filepath.Join(PUBDIR, v["url"])
 
-	// Copy globals (will override title and description for markdown layouts
+	// Override default values with globals
 	for name, value := range globals {
 		v[name] = value
 	}
 
-	// Add default values extracted from file name/path
-	if _, err := os.Stat(filepath.Join(ZSDIR, "layout.amber")); err == nil {
-		v["layout"] = "layout.amber"
-	} else {
-		v["layout"] = "layout.html"
+	// Add layout if none is specified
+	if _, ok := v["layout"]; !ok {
+		if _, err := os.Stat(filepath.Join(ZSDIR, "layout.amber")); err == nil {
+			v["layout"] = "layout.amber"
+		} else {
+			v["layout"] = "layout.html"
+		}
 	}
-	v["file"] = path
-	v["url"] = path[:len(path)-len(filepath.Ext(path))] + ".html"
-	v["output"] = filepath.Join(PUBDIR, v["url"])
 
 	delim := "\n---\n"
 	if sep := strings.Index(s, delim); sep == -1 {
@@ -132,6 +134,7 @@ func getVars(path string, globals Vars) (Vars, string, error) {
 			fmt.Println("ERROR: failed to parse header", err)
 			return nil, "", err
 		} else {
+			// Override default values + globals with the ones defines in the file
 			for key, value := range vars {
 				v[key] = value
 			}
@@ -398,7 +401,7 @@ func main() {
 			fmt.Println("var: filename expected")
 		} else {
 			s := ""
-			if vars, _, err := getVars(args[0], globals()); err != nil {
+			if vars, _, err := getVars(args[0], Vars{}); err != nil {
 				fmt.Println("var: " + err.Error())
 			} else {
 				if len(args) > 1 {
