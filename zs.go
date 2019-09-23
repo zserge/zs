@@ -191,7 +191,7 @@ func buildMarkdown(path string, w io.Writer, vars Vars) error {
 	if err != nil {
 		return err
 	}
-	v["content"] = string(blackfriday.MarkdownCommon([]byte(content)))
+	v["content"] = string(blackfriday.Run([]byte(content)))
 	if w == nil {
 		out, err := os.Create(filepath.Join(PUBDIR, renameExt(path, "", ".html")))
 		if err != nil {
