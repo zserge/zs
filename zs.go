@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/eknkc/amber"
-	"github.com/russross/blackfriday"
 	"github.com/yosssi/gcss"
+	"gopkg.in/russross/blackfriday.v2"
 	"gopkg.in/yaml.v2"
 )
 
