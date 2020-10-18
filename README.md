@@ -90,7 +90,7 @@ content generation, or additional commands, like LESS to CSS conversion:
 
 	#!/bin/sh
 	lessc < $ZS_OUTDIR/styles.less > $ZS_OUTDIR/styles.css
-	rm -f $ZS_OUTDIR/styles.css
+	rm -f $ZS_OUTDIR/styles.less
 
 ## Syntax sugar
 
